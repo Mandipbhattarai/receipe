@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 const imageModel = genAI.getGenerativeModel({
   model: "gemini-2.0-flash-exp-image-generation",
+});
+
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION!,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
 });
 
 const generationConfig = {
@@ -25,6 +34,20 @@ const formSchema = z.object({
   dietary: z.string().optional(),
   mealType: z.string().optional(),
 });
+
+async function uploadToS3(buffer: Buffer, fileName: string) {
+  const command = new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET_NAME!,
+    Key: `recipes/${fileName}`,
+    Body: buffer,
+    ContentType: "image/png",
+    ACL: "public-read",
+  });
+
+  await s3Client.send(command);
+
+  return `https://${process.env.S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/recipes/${fileName}`;
+}
 
 export async function POST(req: Request) {
   try {
@@ -57,7 +80,6 @@ Return the result in strict JSON format:
     responseText = responseText.replace(/```json|```/g, "").trim();
     const recipe = JSON.parse(responseText);
 
-    // Generate image
     const imagePrompt = `
 Generate a high-quality, photorealistic image of the dish "${recipe.title}".
 Cuisine: ${recipe.cuisine}.
@@ -95,7 +117,11 @@ Do not include text or watermarks.
       throw new Error("Image generation failed");
     }
 
-    recipe.image = `data:image/png;base64,${base64Image}`;
+    const buffer = Buffer.from(base64Image, "base64");
+    const fileName = `${recipe.title.replace(/\s+/g, "_")}_${Date.now()}.png`;
+    const imageUrl = await uploadToS3(buffer, fileName);
+
+    recipe.image = imageUrl;
 
     return NextResponse.json({ recipe });
   } catch (error: any) {
