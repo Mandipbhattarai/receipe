@@ -24,7 +24,6 @@ const navLinks = [
   { name: "Home", href: "/" },
   { name: "Recipes", href: "/recipes" },
   { name: "Generate Recipe", href: "/generate" },
-  { name: "Collections", href: "/collections" },
   { name: "Saved Recipes", href: "/saved" },
 ];
 
