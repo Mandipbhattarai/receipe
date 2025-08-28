@@ -41,7 +41,6 @@ async function uploadToS3(buffer: Buffer, fileName: string) {
     Key: `recipes/${fileName}`,
     Body: buffer,
     ContentType: "image/png",
-    ACL: "public-read",
   });
 
   await s3Client.send(command);
@@ -80,6 +79,7 @@ Return the result in strict JSON format:
     responseText = responseText.replace(/```json|```/g, "").trim();
     const recipe = JSON.parse(responseText);
 
+    // Generate image
     const imagePrompt = `
 Generate a high-quality, photorealistic image of the dish "${recipe.title}".
 Cuisine: ${recipe.cuisine}.
