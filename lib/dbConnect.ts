@@ -1,42 +1,41 @@
-import mongoose from "mongoose";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+
 declare global {
-  var mongoose: any;
+  var dynamo:
+    | {
+        client: DynamoDBClient | null;
+        docClient: DynamoDBDocumentClient | null;
+      }
+    | undefined;
 }
 
-let cached = global.mongoose;
-
-if (!cached) {
-  cached = global.mongoose = { conn: null, promise: null };
-}
+let cached =
+  global.dynamo ?? (global.dynamo = { client: null, docClient: null });
 
 async function dbConnect() {
-  const MONGODB_URI = process.env.MONGODB_URI!;
+  if (cached.docClient) {
+    return cached.docClient;
+  }
 
-  if (!MONGODB_URI) {
+  const AWS_REGION = process.env.AWS_REGION;
+
+  if (!AWS_REGION) {
     throw new Error(
-      "Please define the MONGODB_URI environment variable inside .env.local"
+      "Please define the AWS_REGION environment variable inside .env.local"
     );
   }
 
-  if (cached.conn) {
-    return cached.conn;
-  }
-  if (!cached.promise) {
-    const opts = {
-      bufferCommands: false,
-    };
-    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-      return mongoose;
-    });
-  }
-  try {
-    cached.conn = await cached.promise;
-  } catch (e) {
-    cached.promise = null;
-    throw e;
-  }
+  const client = new DynamoDBClient({
+    region: AWS_REGION,
+  });
 
-  return cached.conn;
+  const docClient = DynamoDBDocumentClient.from(client);
+
+  cached.client = client;
+  cached.docClient = docClient;
+
+  return docClient;
 }
 
 export default dbConnect;

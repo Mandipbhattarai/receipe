@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
-import User from "@/models/User";
-import Recipe from "@/models/Recipe";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { v4 as uuidv4 } from "uuid";
 
 export async function POST(req: NextRequest) {
   try {
-    await dbConnect();
-
+    const docClient = await dbConnect();
     const {
       email,
       title,
@@ -22,6 +21,7 @@ export async function POST(req: NextRequest) {
       servings,
     } = await req.json();
 
+    // ✅ Validation
     if (!email || !title || !ingredients || !instructions) {
       return NextResponse.json(
         { error: "Missing required fields" },
@@ -29,13 +29,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const user = await User.findOne({ email });
+    // ✅ Ensure user exists
+    const userResult = await docClient.send(
+      new GetCommand({
+        TableName: process.env.DYNAMO_USER_TABLE!,
+        Key: { email },
+      })
+    );
+
+    const user = userResult.Item;
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const newRecipe = await Recipe.create({
-      user: user._id,
+    // ✅ Create recipe item
+    const newRecipe = {
+      id: uuidv4(),
+      userEmail: email,
       title,
       ingredients,
       instructions,
@@ -47,13 +57,27 @@ export async function POST(req: NextRequest) {
       cuisine,
       dietary,
       mealType,
-    });
+      isFavorite: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    // ✅ Save recipe to DynamoDB
+    await docClient.send(
+      new PutCommand({
+        TableName: process.env.DYNAMO_RECIPES_TABLE!,
+        Item: newRecipe,
+      })
+    );
 
     return NextResponse.json(
-      { message: "Recipe saved successfully", recipe: newRecipe },
+      {
+        message: "Recipe saved successfully",
+        recipe: newRecipe,
+      },
       { status: 201 }
     );
   } catch (err: any) {
+    console.error("Error saving recipe:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

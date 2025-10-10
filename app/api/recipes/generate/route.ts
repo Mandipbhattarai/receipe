@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI, Modality } from "@google/genai";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-const imageModel = genAI.getGenerativeModel({
-  model: "gemini-2.0-flash-exp-image-generation",
-});
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION!,
@@ -17,15 +12,6 @@ const s3Client = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
   },
 });
-
-const generationConfig = {
-  temperature: 1,
-  topP: 0.95,
-  topK: 40,
-  maxOutputTokens: 8192,
-  responseModalities: ["image", "text"],
-  responseMimeType: "text/plain",
-};
 
 const formSchema = z.object({
   prompt: z.string().min(3),
@@ -74,39 +60,43 @@ Return the result in strict JSON format:
 }
 `;
 
-    const result = await model.generateContent(prompt);
-    let responseText = result.response.text();
+    // Generate recipe text using new SDK
+    const result = await ai.models.generateContent({
+      model: "gemini-2.0-flash-001",
+      contents: prompt,
+    });
+
+    if (!result.text) {
+      throw new Error("Failed to generate recipe text");
+    }
+
+    let responseText = result.text;
     responseText = responseText.replace(/```json|```/g, "").trim();
     const recipe = JSON.parse(responseText);
 
-    // Generate image
-    const imagePrompt = `
-Generate a high-quality, photorealistic image of the dish "${recipe.title}".
-Cuisine: ${recipe.cuisine}.
-Key ingredients: ${JSON.stringify(recipe.ingredients)}.
-Present the dish attractively in a well-lit, natural setting.
-Use a clean background and realistic textures.
-Camera angle: top-down or 45-degree preferred.
-Do not include text or watermarks.
-`;
+    const imagePrompt = `Generate a high-quality, photorealistic image of the dish "${
+      recipe.title
+    }". 
+Cuisine: ${recipe.cuisine}. 
+Key ingredients: ${recipe.ingredients.slice(0, 5).join(", ")}. 
+Present the dish attractively plated in a well-lit, natural setting with a clean background and realistic textures. 
+Camera angle: 45-degree view preferred. 
+Do not include any text or watermarks.`;
 
-    const chatSession = imageModel.startChat({
-      generationConfig,
-      history: [
-        {
-          role: "user",
-          parts: [{ text: imagePrompt }],
-        },
-      ],
+    const imageResult = await ai.models.generateContent({
+      model: "gemini-2.0-flash-preview-image-generation",
+      contents: imagePrompt,
+      config: {
+        responseModalities: [Modality.TEXT, Modality.IMAGE],
+      },
     });
 
-    const imageResult = await chatSession.sendMessage("Generate the image now");
-    const candidates = imageResult.response.candidates;
+    // Extract image from response
+    let base64Image: string | null = null;
 
-    let base64Image = null;
-    for (const candidate of candidates || []) {
-      for (const part of candidate.content?.parts || []) {
-        if (part.inlineData) {
+    if (imageResult.candidates && imageResult.candidates.length > 0) {
+      for (const part of imageResult.candidates?.[0]?.content?.parts ?? []) {
+        if (part.inlineData?.data) {
           base64Image = part.inlineData.data;
           break;
         }
@@ -114,7 +104,7 @@ Do not include text or watermarks.
     }
 
     if (!base64Image) {
-      throw new Error("Image generation failed");
+      throw new Error("Image generation failed - no image data returned");
     }
 
     const buffer = Buffer.from(base64Image, "base64");

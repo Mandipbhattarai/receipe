@@ -1,24 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
-import Recipe from "@/models/Recipe";
+import { ScanCommand } from "@aws-sdk/lib-dynamodb";
 
 export async function POST(req: NextRequest) {
   try {
-    await dbConnect();
     const { email } = await req.json();
 
     if (!email) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
 
-    const recipes = await Recipe.find({ isFavorite: true })
-      .populate("user", "email")
-      .lean();
+    const docClient = await dbConnect();
+    const TABLE_NAME = process.env.DYNAMO_RECIPES_TABLE!;
 
-    const userFavorites = recipes.filter((r: any) => r.user?.email === email);
+    // 🔍 Scan all recipes and filter in memory
+    // (you can later optimize this with a GSI if needed)
+    const result = await docClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: "userEmail = :email AND isFavorite = :fav",
+        ExpressionAttributeValues: {
+          ":email": email,
+          ":fav": true,
+        },
+      })
+    );
 
-    return NextResponse.json({ recipes: userFavorites }, { status: 200 });
+    const recipes = result.Items || [];
+
+    return NextResponse.json({ recipes }, { status: 200 });
   } catch (err: any) {
+    console.error("Error fetching favorites:", err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

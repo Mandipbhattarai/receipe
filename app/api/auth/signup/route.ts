@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import User from "@/models/User";
 import bcrypt from "bcryptjs";
 import dbConnect from "@/lib/dbConnect";
+import { GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
+import { v4 as uuidv4 } from "uuid";
 
 export async function POST(req: Request) {
   const { name, username, email, bio, password, confirmPassword } =
@@ -22,31 +23,51 @@ export async function POST(req: Request) {
   }
 
   try {
-    await dbConnect();
+    const docClient = await dbConnect();
+    const TABLE_NAME = process.env.DYNAMO_USER_TABLE!;
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    // Check if user already exists
+    const existingUser = await docClient.send(
+      new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { email },
+      })
+    );
+
+    if (existingUser.Item) {
       return NextResponse.json(
         { error: "Email already registered" },
         { status: 409 }
       );
     }
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const newUser = await User.create({
+    // Create new user
+    const newUser = {
+      id: uuidv4(),
       name,
       username,
       email,
-      bio,
+      bio: bio || "",
       password: hashedPassword,
-    });
+      createdAt: new Date().toISOString(),
+    };
+
+    // Save to DynamoDB
+    await docClient.send(
+      new PutCommand({
+        TableName: TABLE_NAME,
+        Item: newUser,
+      })
+    );
 
     return NextResponse.json(
       {
         message: "Signup successful",
         user: {
-          id: newUser._id,
+          id: newUser.id,
           name: newUser.name,
           username: newUser.username,
           email: newUser.email,
@@ -55,6 +76,7 @@ export async function POST(req: Request) {
       { status: 201 }
     );
   } catch (error: any) {
+    console.error("Signup error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

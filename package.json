@@ -9,9 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.902.0",
     "@aws-sdk/client-s3": "^3.873.0",
+    "@aws-sdk/lib-dynamodb": "^3.902.0",
     "@emotion/is-prop-valid": "latest",
-    "@google/generative-ai": "^0.24.0",
+    "@google/genai": "^1.23.0",
     "@hookform/resolvers": "latest",
     "@radix-ui/react-accordion": "^1.2.2",
     "@radix-ui/react-alert-dialog": "^1.1.4",
